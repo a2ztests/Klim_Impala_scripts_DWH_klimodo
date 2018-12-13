@@ -1,0 +1,406 @@
+﻿DROP VIEW IF EXISTS klimodo.vw_Klimodo_hospitalization_data_select;
+-- select * from klimodo.vw_Klimodo_hospitalization_data_select
+
+CREATE VIEW IF NOT EXISTS klimodo.vw_Klimodo_hospitalization_data_select
+  --  [(column_name [COMMENT 'column_comment'][, ...])]
+    COMMENT 'This wiew captures the data from the hospitalization tables'
+  AS
+
+select
+Dim_Patient_Visit.patient_GK as identity --h_vis.identity--Connect this to the select of all the distance calculations using the hashed(hospitalizations_visit.identity)
+
+,Dim_Patient_Visit.visit_start_date as hospitalisation_date--Dim_Patient_Visit.visit_start_date --this field will not be provided to the researcher ,h_vis.hospitalisation_date
+,Dim_Patient_Visit.original_visit_number as Visit_Number -- ,h_vis.Visit_Number --this field will not be provided to the researcher
+,Dim_Patient_Visit.med_visit_GK as No_Hospitalization-- this is the equivalent field btw all the tables equivalent to h_vis.No_Hospitalization --this field will not be provided to the researcher
+,Fact_Visit_Diagnostincs.ICD9_First_Diagnostic_code as Main_Diagnose -- h_main.Main_Diagnose
+
+--Amir (DONE) - take care of this change: NEED TO ADD THIS TO THE CODE USING THIS VIEW
+,Fact_Visit_Diagnostincs.ICD9_Secondary_Diagnostic_code as Second_Diagnose
+
+
+,Fact_Visit_Operations.ICD9_First_Operation_code as Main_Operation--,h_main.Main_Operation
+
+
+--There is no field: Fact_Visit_Diagnostincs.ICD9_First_Diagnostic_type (also not in Dim_ICD9_Diagnose)
+,Fact_Visit_Diagnostincs.ICD9_Secondary_Diagnostic_type as diagnose_type --,h_chron.diagnose_type
+
+
+
+,Dim_Patient_Visit.patient_visit_reason_code as visit_reason --,h_vis.visit_reason
+,Dim_Patient_Visit.institute_MBR_code as institute_code --,h_vis.institute_code
+
+
+ --Difference in months between birthday PLUS 7 days  & hospitalisation_date MINUS 5 days
+--Assumption (firm) - dates will be transformed to chars when loading to the resort
+,int_months_between(
+cast(
+         concat(
+           substr(Dim_Patient_Visit.visit_start_date,1,4),"-", substr(Dim_Patient_Visit.visit_start_date, 6,2),"-", substr(Dim_Patient_Visit.visit_start_date,9,2)
+               )
+        as timestamp
+        ) -interval 5 days,
+
+
+cast(
+         concat(
+         -- Dim_Med_Visit_Patient_Visit.birth_year should be changed to string as Dim_Med_Visit_Patient_Visit.birth_year0101 when recieved to in the reservoir by Tachman
+           substr(Dim_Patient_Visit.birth_year,1,4),"-",substr(Dim_Patient_Visit.birth_year, 6,2),"-",substr(Dim_Patient_Visit.birth_year,9,2)
+               )
+        as timestamp
+        ) +interval 7 days
+) as age_in_months --This will probably be replaced by age groups using IPV2
+
+
+,Fact_Visit_Operations.ICD9_Secondary_Operation_code as secondary_diagnoseoperation--, h_second.secondary_diagnoseoperation
+
+--Amir (DONE) need to change this in the underlying code
+,Fact_Visit_Operations.ICD9_Secondary_Operation_type as Secondary_Operation_type --,h_second.secondary_diagnoseoperation_type
+
+,Dim_Patient_Visit.gender_code as gender --,h_vis.gender
+  --Amir (DONE): NEED TO TAKE THIS OFF FROM THE CODE USING THIS VIEW: no such field: h_vis.discharge_type
+,Fact_Visit_Events.city_code --,h_vis.city_code
+
+/*
+--from reservoir.hospitalizations_visit h_vis - change for all the tables to reservoir
+from klimodo.hospitalizations_visit h_vis
+left join klimodo.hosp_ward_main_dgop h_main
+on  h_vis.No_Hospitalization =h_main.No_Hospitalization
+and h_vis.institute_code =h_main.institute_code
+
+left join klimodo.hosp_chronic_diagnosis  h_chron
+on h_vis.No_Hospitalization =h_chron.No_Hospitalization
+and h_vis.institute_code =h_chron.institute_code
+
+left join klimodo.hosp_ward_secondary_dgop h_second
+on h_vis.No_Hospitalization =h_second.No_Hospitalization
+and h_vis.institute_code =h_second.institute_code
+
+
+where
+h_vis.identity is not null
+and h_vis.city_code is not null
+and h_vis.hospitalisation_date is not null
+and h_vis.No_Hospitalization is not null
+and h_chron.diagnose_code in(...
+
++++++++++++++++++++++++++++++
+select ROW_NUMBER() OVER (Order by Fact_Visit_Payments.Patient_GK,
+Fact_Visit_Payments.Med_Visit_GK,
+Fact_Visit_Payments.Patient_Visit_Payments_GK) AS RowNumber,
+
+--Dim_Patient
+Dim_Patient.patient_GK as Dim_Patient_patient_GK, --h_vis.identity
+Dim_Patient.id_type as Dim_Patient_id_type ,
+Dim_Patient.born_year as Dim_Patient_born_year ,
+Dim_Patient.gender_code as Dim_Patient_gender_code ,
+Dim_Patient.nation_code as Dim_Patient_nation_code ,
+Dim_Patient.religion_code as Dim_Patient_religion_code ,
+Dim_Patient.country_of_birth as Dim_Patient_country_of_birth ,
+Dim_Patient.immigration_year as Dim_Patient_immigration_year ,
+Dim_Patient.death_date as Dim_Patient_death_date ,
+
+
+--Dim_Patient_Visit
+Dim_Patient_Visit.med_visit_GK as Dim_Patient_Visit_med_visit_GK ,
+Dim_Patient_Visit.patient_GK as Dim_Patient_Visit_patient_GK ,
+Dim_Patient_Visit.Visit_Start_Date as Dim_Patient_Visit_Visit_Start_Date ,
+Dim_Patient_Visit.Visit_Start_Time as Dim_Patient_Visit_Visit_Start_Time ,
+Dim_Patient_Visit.Birth_Year as Dim_Patient_Visit_Birth_Year,
+Dim_Patient_Visit.Visit_End_Date as Dim_Patient_Visit_Visit_End_Date ,
+Dim_Patient_Visit.Visit_End_Time as Dim_Patient_Visit_Visit_End_Time ,
+Dim_Patient_Visit.patient_type_GK as Dim_Patient_Visit_patient_type_GK ,
+Dim_Patient_Visit.Patient_ID_Type as Dim_Patient_Visit_Patient_ID_Type ,
+Dim_Patient_Visit.Patient_Visit_Reason_GK as
+Dim_Patient_Visit_Patient_Visit_Reason_GK ,
+Dim_Patient_Visit.Insurer_GK as Dim_Patient_Visit_Insurer_GK ,
+Dim_Patient_Visit.total_stay_days as Dim_Patient_Visit_total_stay_days ,
+Dim_Patient_Visit.patient_referrer_GK as Dim_Patient_Visit_patient_referrer_GK ,
+Dim_Patient_Visit.Patient_Release_Type_GK as
+Dim_Patient_Visit_Patient_Release_Type_GK ,
+Dim_Patient_Visit.admission_dept_GK as Dim_Patient_Visit_admission_dept_GK ,
+Dim_Patient_Visit.discharge_dept_GK as Dim_Patient_Visit_discharge_dept_GK ,
+Dim_Patient_Visit.destination_GK as Dim_Patient_Visit_destination_GK ,
+
+
+--Fact_Visit_Operations
+Fact_Visit_Operations.Visit_GK as Fact_Visit_Operations_Visit_GK ,
+Fact_Visit_Operations.Patient_GK as Fact_Visit_Operations_Patient_GK ,
+Fact_Visit_Operations.patient_city_GK as Fact_Visit_Operations_patient_city_GK ,
+Fact_Visit_Operations.Patient_Type_GK as Fact_Visit_Operations_Patient_Type_GK ,
+Fact_Visit_Operations.Patient_Visit_Reason_GK as
+Fact_Visit_Operations_Patient_Visit_Reason_GK ,
+Fact_Visit_Operations.ICD9_Secondary_Operation_code as
+Fact_Visit_Operations_ICD9_Secondary_Operation_code ,
+Fact_Visit_Operations.ICD9_Secondary_Operation_type_GK as
+Fact_Visit_Operations_ICD9_Secondary_Operation_type_GK ,
+Fact_Visit_Operations.Insurer_GK as Fact_Visit_Operations_Insurer_GK ,
+Fact_Visit_Operations.Patient_Release_Type_GK as
+Fact_Visit_Operations_Patient_Release_Type_GK ,
+Fact_Visit_Operations.patient_referrer_GK as
+Fact_Visit_Operations_patient_referrer_GK ,
+Fact_Visit_Operations.destination_GK as Fact_Visit_Operations_destination_GK ,
+Fact_Visit_Operations.paying_entity_GK as
+Fact_Visit_Operations_paying_entity_GK ,
+Fact_Visit_Operations.institute_Dept_GK as
+Fact_Visit_Operations_institute_Dept_GK ,
+
+
+--Fact_Visit_Diagnostincs
+Fact_Visit_Diagnostincs.Visit_GK as Fact_Visit_Diagnostincs_Visit_GK ,
+Fact_Visit_Diagnostincs.Patient_GK as Fact_Visit_Diagnostincs_Patient_GK ,
+Fact_Visit_Diagnostincs.ICD9_Secondary_Diagnostic_code as
+Fact_Visit_Diagnostincs_ICD9_Secondary_Diagnostic_code ,
+Fact_Visit_Diagnostincs.ICD9_Secondary_Diagnostic_type_GK as
+Fact_Visit_Diagnostincs_ICD9_Secondary_Diagnostic_type_GK ,
+Fact_Visit_Diagnostincs.patient_city_GK as
+Fact_Visit_Diagnostincs_patient_city_GK ,
+Fact_Visit_Diagnostincs.Patient_Type_GK as
+Fact_Visit_Diagnostincs_Patient_Type_GK ,
+Fact_Visit_Diagnostincs.Patient_Visit_Reason_GK as
+Fact_Visit_Diagnostincs_Patient_Visit_Reason_GK ,
+Fact_Visit_Diagnostincs.Insurer_GK as Fact_Visit_Diagnostincs_Insurer_GK ,
+Fact_Visit_Diagnostincs.Patient_Release_Type_GK as
+Fact_Visit_Diagnostincs_Patient_Release_Type_GK,
+Fact_Visit_Diagnostincs.patient_referrer_GK as
+Fact_Visit_Diagnostincs_patient_referrer_GK ,
+Fact_Visit_Diagnostincs.destination_GK as
+Fact_Visit_Diagnostincs_destination_GK ,
+Fact_Visit_Diagnostincs.institute_Dept_GK as
+Fact_Visit_Diagnostincs_institute_Dept_GK ,
+
+
+--Fact_Visit_Events
+Fact_Visit_Events.med_visit_GK as Fact_Visit_Events_med_visit_GK ,
+Fact_Visit_Events.department_entry_date as
+Fact_Visit_Events_department_entry_date ,
+Fact_Visit_Events.department_entry_time as
+Fact_Visit_Events_department_entry_time ,
+Fact_Visit_Events.department_exit_date as
+Fact_Visit_Events_department_exit_date ,
+Fact_Visit_Events.department_exit_time as
+Fact_Visit_Events_department_exit_time ,
+Fact_Visit_Events.patient_GK as Fact_Visit_Events_patient_GK ,
+Fact_Visit_Events.patient_ID_type as Fact_Visit_Events_patient_ID_type ,
+Fact_Visit_Events.first_diagnosis as Fact_Visit_Events_first_diagnosis ,
+Fact_Visit_Events.first_operation as Fact_Visit_Events_first_operation ,
+Fact_Visit_Events.visit_start_date as Fact_Visit_Events_visit_start_date ,
+Fact_Visit_Events.visit_end_date as Fact_Visit_Events_visit_end_date ,
+Fact_Visit_Events.first_operation_date as
+Fact_Visit_Events_first_operation_date ,
+Fact_Visit_Events.patient_type_GK as Fact_Visit_Events_patient_type_GK ,
+Fact_Visit_Events.patient_age as Fact_Visit_Events_patient_age ,
+Fact_Visit_Events.patient_visit_reason_GK as
+Fact_Visit_Events_patient_visit_reason_GK ,
+Fact_Visit_Events.destination_GK as Fact_Visit_Events_destination_GK ,
+Fact_Visit_Events.stay_hosp_days as Fact_Visit_Events_stay_hosp_days ,
+Fact_Visit_Events.total_hospitalization_days as
+Fact_Visit_Events_total_hospitalization_days ,
+Fact_Visit_Events.patient_referrer_GK as Fact_Visit_Events_patient_referrer_GK ,
+Fact_Visit_Events.insurer_GK as Fact_Visit_Events_insurer_GK ,
+Fact_Visit_Events.paying_entity_GK as Fact_Visit_Events_paying_entity_GK ,
+Fact_Visit_Events.patient_release_type_GK as
+Fact_Visit_Events_patient_release_type_GK ,
+Fact_Visit_Events.patient_hospitalizing_department_GK as
+Fact_Visit_Events_patient_hospitalizing_department_GK ,
+Fact_Visit_Events.transferred_to_dept_GK as
+Fact_Visit_Events_transferred_to_dept_GK ,
+
+--Fact_Visit_Payments
+Fact_Visit_Payments.Patient_Visit_Payments_GK as
+Fact_Visit_Payments_Patient_Visit_Payments_GK,
+Fact_Visit_Payments.Med_Visit_GK as Fact_Visit_Payments_Med_Visit_GK,
+Fact_Visit_Payments.Patient_GK as Fact_Visit_Payments_Patient_GK,
+Fact_Visit_Payments.patient_city_GK as Fact_Visit_Payments_patient_city_GK,
+Fact_Visit_Payments.institute_Dept_GK as Fact_Visit_Payments_institute_Dept_GK,
+Fact_Visit_Payments.patient_referrer_GK as
+Fact_Visit_Payments_patient_referrer_GK,
+Fact_Visit_Payments.Paying_Entity_GK as Fact_Visit_Payments_Paying_Entity_GK
+
+
+--Fact_Visit_Diagnostincs & Fact_Visit_Events are leading in the select
+
+*/
+from dwh.Dim_Med_Visit_Patient_Visit Dim_Patient_Visit -- h_vis
+--use left join becasue there are records in the folloing select:
+/*
+  SELECT distinct d.Visit_GK, d.Patient_GK   FROM
+dwh.Fact_Med_Visit_Patient_Visit_Diagnostics d
+  except
+  SELECT distinct v.med_Visit_GK, v.Patient_GK   FROM
+dwh.Dim_Med_Visit_Patient_Visit v
+*/
+--left join dwh.Fact_Med_Visit_Patient_Visit_Diagnostics
+join dwh.Fact_Med_Visit_Patient_Visit_Diagnostics
+Fact_Visit_Diagnostincs  on Fact_Visit_Diagnostincs.Visit_GK=Dim_Patient_Visit.Med_Visit_GK
+--NO need for this addittion because Visit_GK is enough for the connection- Amir added on - 21.11.2018:  and Fact_Visit_Diagnostincs.patient_GK =Dim_Patient_Visit.patient_GK 
+
+--connction of 2 fact tables is not allowed - only via dim
+--left join dwh.Fact_Med_Visit_Patient_Visit_Events Fact_Visit_Events on Fact_Visit_Diagnostincs.Visit_GK =Fact_Visit_Events.Med_Visit_GK and Fact_Visit_Diagnostincs.patient_GK =Fact_Visit_Events.patient_GK
+
+--left join dwh.Fact_Med_Visit_Patient_Visit_Events Fact_Visit_Events on
+join dwh.Fact_Med_Visit_Patient_Visit_Events Fact_Visit_Events on
+Fact_Visit_Events.Med_Visit_GK = Dim_Patient_Visit.med_Visit_GK
+
+--right join dwh.Fact_Med_Visit_Patient_Visit_Operations
+join dwh.Fact_Med_Visit_Patient_Visit_Operations
+Fact_Visit_Operations on Fact_Visit_Operations.Visit_GK=Dim_Patient_Visit.Med_Visit_GK
+
+--NO NEED FOR THIS JOIN: right join dwh.Dim_Patient Dim_Patient on Dim_Patient.patient_GK = Dim_Patient_Visit.patient_GK
+
+--NO NEED FOR THIS JOIN: right join dwh.Fact_Med_Visit_Patient_Visit_Payments Fact_Visit_Payments on Fact_Visit_Payments.med_Visit_GK =Dim_Patient_Visit.Med_Visit_GK
+
+
+where
+/*
+replace to this in production:
+Dim_Patient_Visit.delete_date_time is null
+and Fact_Visit_Events.delete_date_time is null
+and Fact_Visit_Diagnostincs.ETL_delete_date_time  is null
+and  Fact_Visit_Events.delete_date_time is null
+and  Fact_Visit_Operations.ETL_delete_date_time is null
+*/
+
+Dim_Patient_Visit.delete_date_time = 'shaked' 
+and Fact_Visit_Events.delete_date_time = 'shaked'  
+and Fact_Visit_Diagnostincs.ETL_delete_date_time = 'shaked' 
+and  Fact_Visit_Events.delete_date_time = 'shaked' 
+and  Fact_Visit_Operations.ETL_delete_date_time = 'shaked' 
+
+
+
+and Dim_Patient_Visit.patient_GK is not null -- h_vis.identity is not null
+and Fact_Visit_Events.city_code is not null -- h_vis.city_code is not null
+and Dim_Patient_Visit.visit_start_date is not null --h_vis.hospitalisation_date is not null
+and Dim_Patient_Visit.med_visit_GK is not null -- h_vis.No_Hospitalization is not null
+
+--Relevant ICD9 Diagnostic codes for Asthma
+and (
+Fact_Visit_Diagnostincs.ICD9_First_Diagnostic_code in (
+'49300', --Extrinsic asthma, unspecified convert 493.00 to ICD-10-CM
+'49301', --Extrinsic asthma with status asthmaticus convert 493.01 to ICD-10-CM
+'49302', --Extrinsic asthma with (acute) exacerbation convert 493.02 to ICD-10-CM
+'49310', --Intrinsic asthma, unspecified convert 493.10 to ICD-10-CM
+'49311', --Intrinsic asthma with status asthmaticus convert 493.11 to ICD-10-CM
+'49312', --Intrinsic asthma with (acute) exacerbation convert 493.12 to ICD-10-CM
+'49320', --Chronic obstructive asthma, unspecified convert 493.20 to ICD-10-CM
+'49321', --Chronic obstructive asthma with status asthmaticus convert 493.21 to ICD-10-CM
+'49322', --Chronic obstructive asthma with (acute) exacerbation convert 493.22 to ICD-10-CM
+'49381', --Exercise induced bronchospasm convert 493.81 to ICD-10-CM
+'49382', --Cough variant asthma convert 493.82 to ICD-10-CM
+'49390', --Asthma,unspecified type, unspecified convert 493.90 to ICD-10-CM
+'49391',--Asthma, unspecified type, with status asthmaticus convert 493.91 to ICD-10-CM
+'49392') --Asthma, unspecified type, with (acute) exacerbation convert 493.92 to ICD-10-CM
+
+/*אבחנות דומות, עם אפשרות של בלבול עם אסתמה באשפוז/מיון
+'49120', --obstruction airway, chronic airway obstruction
+'49122', --acute bronchitis
+'49121', --exacerbation (acute)
+'4910', --somker’s bronchitis
+'4281', --Cardiac/ cardiobronchial asthma (see also Failure,
+ventricular, left) 428.1
+'5183', --eosinophilic asthma
+'316', --psychogenic asthma
+'500', --Colliers' asthma
+'502', --Grinders' asthma
+'4958', --Red cedar asthma
+'5069', --Meat-wrappers' asthma
+'5078', --Detergent asthma
+'490', --Bronchitis (diffuse) (hypostatic) (infectious) (inflammatory) (simple)
+'4660', --Acute bronchitis
+'46619', --Bronchiolitis (acute) (infectious) (subacute)
+'5064', --chronic bronchiolitis
+'4918', --chronic (obliterative) bronchiolitis
+'99684', --status post lung transplant
+'7862', --Cough
+'78607', --Wheezing respiration
+'78605', --Shortness of breath
+'78609' --Dyspnea (nocturnal) (paroxysmal)
+
+*/
+or
+Fact_Visit_Diagnostincs.ICD9_Secondary_Diagnostic_code in (
+'49300', --Extrinsic asthma, unspecified convert 493.00 to ICD-10-CM
+'49301', --Extrinsic asthma with status asthmaticus convert 493.01 to ICD-10-CM
+'49302', --Extrinsic asthma with (acute) exacerbation convert 493.02 to ICD-10-CM
+'49310', --Intrinsic asthma, unspecified convert 493.10 to ICD-10-CM
+'49311', --Intrinsic asthma with status asthmaticus convert 493.11 to ICD-10-CM
+'49312', --Intrinsic asthma with (acute) exacerbation convert 493.12 to ICD-10-CM
+'49320', --Chronic obstructive asthma, unspecified convert 493.20 to ICD-10-CM
+'49321', --Chronic obstructive asthma with status asthmaticus convert 493.21 to ICD-10-CM
+'49322', --Chronic obstructive asthma with (acute) exacerbation convert 493.22 to ICD-10-CM
+'49381', --Exercise induced bronchospasm convert 493.81 to ICD-10-CM
+'49382', --Cough variant asthma convert 493.82 to ICD-10-CM
+'49390', --Asthma,unspecified type, unspecified convert 493.90 to ICD-10-CM
+'49391',--Asthma, unspecified type, with status asthmaticus convert 493.91 to ICD-10-CM
+'49392') --Asthma, unspecified type, with (acute) exacerbation convert 493.92 to ICD-10-CM
+
+/*אבחנות דומות, עם אפשרות של בלבול עם אסתמה באשפוז/מיון
+'49120', --obstruction airway, chronic airway obstruction
+'49122', --acute bronchitis
+'49121', --exacerbation (acute)
+'4910', --somker’s bronchitis
+'4281', --Cardiac/ cardiobronchial asthma (see also Failure,
+ventricular, left) 428.1
+'5183', --eosinophilic asthma
+'316', --psychogenic asthma
+'500', --Colliers' asthma
+'502', --Grinders' asthma
+'4958', --Red cedar asthma
+'5069', --Meat-wrappers' asthma
+'5078', --Detergent asthma
+'490', --Bronchitis (diffuse) (hypostatic) (infectious) (inflammatory) (simple)
+'4660', --Acute bronchitis
+'46619', --Bronchiolitis (acute) (infectious) (subacute)
+'5064', --chronic bronchiolitis
+'4918', --chronic (obliterative) bronchiolitis
+'99684', --status post lung transplant
+'7862', --Cough
+'78607', --Wheezing respiration
+'78605', --Shortness of breath
+'78609' --Dyspnea (nocturnal) (paroxysmal)
+
+*/
+
+or Fact_Visit_Events.first_diagnosis  in (
+'49300', --Extrinsic asthma, unspecified convert 493.00 to ICD-10-CM
+'49301', --Extrinsic asthma with status asthmaticus convert 493.01 to ICD-10-CM
+'49302', --Extrinsic asthma with (acute) exacerbation convert 493.02 to ICD-10-CM
+'49310', --Intrinsic asthma, unspecified convert 493.10 to ICD-10-CM
+'49311', --Intrinsic asthma with status asthmaticus convert 493.11 to ICD-10-CM
+'49312', --Intrinsic asthma with (acute) exacerbation convert 493.12 to ICD-10-CM
+'49320', --Chronic obstructive asthma, unspecified convert 493.20 to ICD-10-CM
+'49321', --Chronic obstructive asthma with status asthmaticus convert 493.21 to ICD-10-CM
+'49322', --Chronic obstructive asthma with (acute) exacerbation convert 493.22 to ICD-10-CM
+'49381', --Exercise induced bronchospasm convert 493.81 to ICD-10-CM
+'49382', --Cough variant asthma convert 493.82 to ICD-10-CM
+'49390', --Asthma,unspecified type, unspecified convert 493.90 to ICD-10-CM
+'49391',--Asthma, unspecified type, with status asthmaticus convert 493.91 to ICD-10-CM
+'49392') --Asthma, unspecified type, with (acute) exacerbation convert 493.92 to ICD-10-CM
+
+/*אבחנות דומות, עם אפשרות של בלבול עם אסתמה באשפוז/מיון
+'49120', --obstruction airway, chronic airway obstruction
+'49122', --acute bronchitis
+'49121', --exacerbation (acute)
+'4910', --somker’s bronchitis
+'4281', --Cardiac/ cardiobronchial asthma (see also Failure,
+ventricular, left) 428.1
+'5183', --eosinophilic asthma
+'316', --psychogenic asthma
+'500', --Colliers' asthma
+'502', --Grinders' asthma
+'4958', --Red cedar asthma
+'5069', --Meat-wrappers' asthma
+'5078', --Detergent asthma
+'490', --Bronchitis (diffuse) (hypostatic) (infectious) (inflammatory) (simple)
+'4660', --Acute bronchitis
+'46619', --Bronchiolitis (acute) (infectious) (subacute)
+'5064', --chronic bronchiolitis
+'4918', --chronic (obliterative) bronchiolitis
+'99684', --status post lung transplant
+'7862', --Cough
+'78607', --Wheezing respiration
+'78605', --Shortness of breath
+'78609' --Dyspnea (nocturnal) (paroxysmal)
+
+*/
+)
